@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="theme-color" content="#040805"/>
+<title>❯ operate rag studio · --force ./buildyou</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#040805;--surface:#0a0f0a;--border:#1c2b1c;--phos:#3DFF73;--dim:#2EA05C;--acid:#b5ff4d;--warn:#ffaa00;--error:#ff4f4f;--text:#e0e0f0;--muted:#5a7a5a;--faint:#060a06;--blue:#3b82f6;--purple:#a855f7}
+body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow-x:hidden}
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+textarea,input{color-scheme:dark}textarea::placeholder,input::placeholder{color:#2a3a2a}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.cursor{display:inline-block;width:8px;height:1em;background:var(--acid);vertical-align:middle;animation:blink 1s step-end infinite;margin-left:2px}
+.footer{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:6px 16px;display:flex;justify-content:space-between;z-index:100;font-size:10px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useCallback,useRef,useEffect}=React;
+const C={bg:"#040805",surface:"#0a0f0a",border:"#1c2b1c",accent:"#3DFF73",accentDim:"#3DFF7322",warn:"#ffaa00",error:"#ff4f4f",text:"#e0e0f0",muted:"#5a7a5a",faint:"#060a06",blue:"#3b82f6",purple:"#a855f7"};
+const MONO="'JetBrains Mono',monospace";
+
+function useW(){const [w,setW]=useState(800);useEffect(()=>{const fn=()=>setW(window.innerWidth);fn();window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn)},[]);return w}
+
+async function callClaude({system,user,tools,maxTokens=1000,apiKey}){
+  const body={model:"claude-sonnet-4-6",max_tokens:maxTokens,messages:[{role:"user",content:user}]};
+  if(system)body.system=system;if(tools)body.tools=tools;
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(data.error)throw new Error(data.error.message);
+  return data.content?.map(b=>b.text||"").filter(Boolean).join("")||"";
+}
+
+function parseOperate(raw){
+  const files=[];
+  const blocks=raw.split(/\/\/\s*={3,}\s*\n\/\/\s*=====\s*(.+?)\s*=====\s*\n\/\/\s*={3,}/);
+  for(let i=1;i<blocks.length;i+=2){const name=blocks[i].trim();const content=(blocks[i+1]||"").trim();if(name)files.push({name,original:content,enhanced:null,status:"idle",editing:false});}
+  if(!files.length){const s=raw.split(/\/\/\s*=====\s*(.+?)\s*=====/);for(let i=1;i<s.length;i+=2)files.push({name:s[i].trim(),original:(s[i+1]||"").trim(),enhanced:null,status:"idle",editing:false});}
+  if(!files.length)files.push({name:"scaffold.js",original:raw.trim(),enhanced:null,status:"idle",editing:false});
+  return files;
+}
+
+function Btn({children,onClick,v="default",sm,disabled,full,sx={}}){
+  const base={display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,padding:sm?"8px 14px":"11px 20px",minHeight:sm?36:44,fontSize:sm?11:12,fontFamily:MONO,letterSpacing:"0.06em",borderRadius:6,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.4:1,border:"1px solid",transition:"opacity 0.15s",width:full?"100%":undefined,flexShrink:0,...sx};
+  const vs={default:{background:"#0f1a0f",color:C.text,borderColor:C.border},accent:{background:C.accent,color:"#000",borderColor:C.accent},ghost:{background:"transparent",color:C.muted,borderColor:C.border},danger:{background:"transparent",color:C.error,borderColor:C.error+"55"},blue:{background:"#132040",color:C.blue,borderColor:C.blue+"55"},purple:{background:"#1e1030",color:C.purple,borderColor:C.purple+"55"}};
+  return <button onClick={disabled?undefined:onClick} style={{...base,...vs[v]}}>{children}</button>;
+}
+function Lbl({children}){return <div style={{fontSize:10,color:C.muted,letterSpacing:"0.14em",marginBottom:6,textTransform:"uppercase"}}>{children}</div>}
+function Dot({status}){const map={done:C.accent,working:C.warn,error:C.error,idle:C.border};return <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",flexShrink:0,background:map[status]||C.border,boxShadow:status==="working"?`0 0 6px ${C.warn}`:status==="done"?`0 0 5px ${C.accent}66`:"none",animation:status==="working"?"pulse 1s infinite":"none"}}/>}
+function TA({value,onChange,placeholder,height=120}){return <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{width:"100%",height,background:"#020402",color:C.text,fontFamily:MONO,fontSize:12,lineHeight:1.65,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px",resize:"vertical",boxSizing:"border-box",outline:"none",display:"block"}}/>}
+function Card({children,style={}}){return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,...style}}>{children}</div>}
+
+const FRAMEWORKS=["Next.js","React+Vite","SvelteKit","Astro","Vanilla HTML"];
+const TONES=["Professional","Minimal","Bold","Playful","Luxe","Techy"];
+const PRESETS=[{name:"Terminal Forest",bg:"#040805",accent:"#3DFF73"},{name:"Acid",bg:"#040805",accent:"#b5ff4d"},{name:"Dim Moss",bg:"#0a0f0a",accent:"#2EA05C"},{name:"Light",bg:"#fafaf9",accent:"#2563eb"},{name:"Ocean",bg:"#061420",accent:"#06b6d4"}];
+
+function PanelTab({operateRaw,setOperateRaw,parsed,setParsed,setFiles,handleParse,urls,setUrls,addURL,removeURL,scrapeURL,scrapedData,setScrapedData,manualData,setManualData,log,logRef}){
+  return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
+    <div><Lbl>OPERATE Output</Lbl><TA value={operateRaw} onChange={setOperateRaw} placeholder={"Paste OPERATE.exe™ output here…\n// ===== app/page.jsx =====\n// ..."} height={140}/>
+      <div style={{display:"flex",gap:8,marginTop:8}}><Btn full v={operateRaw.trim()?"accent":"default"} onClick={handleParse}>Parse ({parseOperate(operateRaw||" ").length} files detected)</Btn>{parsed&&<Btn sm v="ghost" onClick={()=>{setFiles([]);setParsed(false)}}>Reset</Btn>}</div>
+      {parsed&&<div style={{fontSize:11,color:C.accent,marginTop:8}}>✓ Parsed — go to BUILD tab to enhance</div>}</div>
+    <div><Lbl>URL Data Sources</Lbl>
+      {urls.map(item=>(<div key={item.id} style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}><Dot status={item.status}/><input value={item.url} onChange={e=>setUrls(p=>p.map(u=>u.id===item.id?{...u,url:e.target.value}:u))} placeholder="https://example.com" style={{flex:1,minWidth:0,background:"#020402",color:C.text,fontFamily:MONO,fontSize:12,border:`1px solid ${C.border}`,borderRadius:5,padding:"9px 10px",outline:"none"}}/><Btn sm v="blue" onClick={()=>scrapeURL(item)} disabled={item.status==="working"||!item.url}>{item.status==="working"?"…":item.status==="done"?"✓":"Fetch"}</Btn><Btn sm v="danger" onClick={()=>removeURL(item.id)}>✕</Btn></div>))}
+      <Btn sm v="ghost" full onClick={addURL}>+ Add URL</Btn>
+      {scrapedData&&(<div style={{marginTop:10}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:10,color:C.accent}}>✓ {urls.filter(u=>u.status==="done").length} scraped</span><Btn sm v="danger" onClick={()=>setScrapedData("")}>Clear</Btn></div><pre style={{fontSize:10,color:"#3a4a3a",lineHeight:1.6,maxHeight:100,overflowY:"auto",margin:0,whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#020402",padding:"8px 10px",borderRadius:5,border:`1px solid ${C.border}`}}>{scrapedData.slice(0,800)}{scrapedData.length>800?"…":""}</pre></div>)}</div>
+    <div><Lbl>Project Data</Lbl><TA value={manualData} onChange={setManualData} placeholder={"Business name, description, features, brand voice, target audience…"} height={120}/></div>
+    <div><Lbl>Pipeline Log</Lbl><div ref={logRef} style={{height:130,overflowY:"auto",background:"#020402",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>{!log.length&&<div style={{color:"#1a2a1a",fontSize:11}}>Awaiting…</div>}{log.map((e,i)=>(<div key={i} style={{fontSize:10.5,lineHeight:1.8,color:e.type==="success"?C.accent:e.type==="error"?C.error:e.type==="warn"?C.warn:e.type==="system"?"#3a4a3a":"#2a3a2a"}}><span style={{color:"#1a2a1a",marginRight:5}}>{e.t}</span>{e.msg}</div>))}</div></div>
+  </div>);
+}
+
+function CustomizeTab({config,onChange}){
+  const chip=(items,val,set,activeColor=C.accent)=>(<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>{items.map(it=>(<button key={it} onClick={()=>set(it)} style={{padding:"7px 13px",fontSize:11,fontFamily:MONO,borderRadius:5,cursor:"pointer",border:`1px solid ${val===it?activeColor:C.border}`,background:val===it?activeColor+"22":"transparent",color:val===it?activeColor:C.muted,minHeight:36}}>{it}</button>))}</div>);
+  return(<div style={{padding:16}}><Lbl>Framework</Lbl>{chip(FRAMEWORKS,config.framework,v=>onChange({...config,framework:v}))}<Lbl>Tone</Lbl>{chip(TONES,config.tone,v=>onChange({...config,tone:v}),C.purple)}<Lbl>Color Preset</Lbl><div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>{PRESETS.map(p=>(<button key={p.name} onClick={()=>onChange({...config,colorPreset:p})} title={p.name} style={{width:44,height:44,borderRadius:8,cursor:"pointer",background:`linear-gradient(135deg,${p.bg} 50%,${p.accent} 50%)`,border:`2px solid ${config.colorPreset?.name===p.name?C.accent:C.border}`}}/>))}</div><Lbl>Pages to Generate</Lbl><TA value={config.pages} onChange={v=>onChange({...config,pages:v})} placeholder="Home, About, Services, Contact, Blog, Pricing…" height={70}/><div style={{marginTop:12}}/><Lbl>Special Instructions</Lbl><TA value={config.instructions} onChange={v=>onChange({...config,instructions:v})} placeholder="Add auth, dark mode, mobile-first, animations…" height={90}/></div>);
+}
+
+function BuildTab({files,parsed,enhanceFile,editFile,saveEdit,resetFile,enhanceAll,globalStatus,buildApp,rebuilding,exportAll,doneCount}){
+  const [edits,setEdits]=useState({});
+  if(!parsed)return(<div style={{padding:32,textAlign:"center"}}><div style={{fontSize:28,marginBottom:12}}>⚕</div><div style={{color:C.muted,fontSize:13,lineHeight:1.6}}>Go to the <span style={{color:C.accent}}>PANEL</span> tab, paste your OPERATE output and hit Parse.</div></div>);
+  return(<div style={{padding:12}}>
+    <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",padding:"10px 12px",background:C.faint,borderRadius:8,alignItems:"center"}}><span style={{fontSize:11,color:C.muted,flex:1}}>{doneCount}/{files.length} enhanced</span>{doneCount>0&&<Btn sm v="ghost" onClick={exportAll}>↓ Export</Btn>}{doneCount>0&&<Btn sm v="purple" disabled={rebuilding} onClick={buildApp}>{rebuilding?"Building…":"▶ Build App"}</Btn>}<Btn sm v="accent" disabled={globalStatus==="running"} onClick={enhanceAll}>{globalStatus==="running"?"Running…":"▶ Run All"}</Btn></div>
+    {files.map((file,i)=>{
+      const display=file.enhanced||file.original;
+      return(<Card key={i} style={{marginBottom:10,overflow:"hidden",border:`1px solid ${file.status==="done"?"#1d3d28":C.border}`}}>
+        <div style={{background:"#060a06",borderBottom:`1px solid ${C.border}`,padding:"8px 10px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Dot status={file.status}/><span style={{fontFamily:MONO,fontSize:11,color:C.text,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</span>{file.status==="done"&&<span style={{fontSize:9,color:C.accent,background:C.accentDim,padding:"2px 6px",borderRadius:3}}>ENHANCED</span>}<div style={{display:"flex",gap:5,flexShrink:0}}>{file.status==="done"&&!file.editing&&<Btn sm v="ghost" onClick={()=>{setEdits(e=>({...e,[i]:display}));editFile(i,true)}}>Edit</Btn>}{file.status==="done"&&<Btn sm v="ghost" onClick={()=>resetFile(i)}>Reset</Btn>}{file.editing&&<><Btn sm v="accent" onClick={()=>saveEdit(i,edits[i]||display)}>Save</Btn><Btn sm v="ghost" onClick={()=>editFile(i,false)}>✕</Btn></>}<Btn sm v={file.status==="done"?"default":"accent"} disabled={file.status==="working"} onClick={()=>enhanceFile(i)}>{file.status==="working"?"…":file.status==="done"?"Re-run":"Enhance"}</Btn></div></div>
+        {file.editing?(<textarea value={edits[i]||display} onChange={e=>setEdits(ed=>({...ed,[i]:e.target.value}))} style={{width:"100%",minHeight:200,background:"#020402",color:C.text,fontFamily:MONO,fontSize:11,lineHeight:1.65,border:"none",outline:"none",padding:"10px 12px",resize:"vertical",boxSizing:"border-box",display:"block"}}/>):(<pre style={{margin:0,padding:"10px 12px",fontFamily:MONO,fontSize:10.5,lineHeight:1.7,color:file.status==="done"?"#a8f0c0":"#2a3a2a",overflowX:"auto",maxHeight:200,overflowY:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{display||"(empty)"}</pre>)}
+        {file.status==="error"&&<div style={{padding:"6px 12px",background:"#1a0000",color:C.error,fontSize:11,fontFamily:MONO}}>⚠ Failed — check data and retry</div>}
+      </Card>);
+    })}
+  </div>);
+}
+
+function OutputTab({html,buildApp,rebuilding}){
+  return(<div style={{height:"100%",display:"flex",flexDirection:"column"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,padding:"10px 14px",borderBottom:`1px solid ${C.border}`,background:C.surface,flexShrink:0}}><span style={{fontFamily:MONO,fontSize:13,color:C.accent}}>APP PREVIEW {html&&"· LIVE"}</span><div style={{display:"flex",gap:8}}>{html&&<Btn sm v="ghost" onClick={()=>{const blob=new Blob([html],{type:"text/html"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="app-output.html";a.click()}}>↓ HTML</Btn>}<Btn sm v="purple" disabled={rebuilding} onClick={buildApp}>{rebuilding?"Building…":html?"Rebuild":"▶ Build App"}</Btn></div></div>
+    {!html?(<div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,color:C.muted}}><div style={{fontSize:36}}>🧬</div><div style={{fontFamily:MONO,fontSize:15,color:"#1a2a1a"}}>No output yet</div><div style={{fontSize:12}}>Enhance files in BUILD, then click ▶ Build App</div></div>):(<iframe srcDoc={html} style={{flex:1,border:"none",background:"#fff"}} title="Preview" sandbox="allow-scripts"/>)}
+  </div>);
+}
+
+const TABS=[{id:"PANEL",icon:"☰",label:"Panel"},{id:"INPUT",icon:"📋",label:"Input"},{id:"CUSTOMIZE",icon:"🎨",label:"Style"},{id:"BUILD",icon:"⚙️",label:"Build"},{id:"OUTPUT",icon:"▶",label:"Output"}];
+
+function App(){
+  const w=useW();const isMobile=w<900;
+  const [tab,setTab]=useState("PANEL");
+  const [apiKey,setApiKey]=useState(localStorage.getItem('operate_key')||'');
+  const [operateRaw,setOperateRaw]=useState("");const [files,setFiles]=useState([]);const [parsed,setParsed]=useState(false);
+  const [urls,setUrls]=useState([{id:1,url:"",status:"idle",data:""}]);const [scrapedData,setScrapedData]=useState("");const [manualData,setManualData]=useState("");
+  const [config,setConfig]=useState({framework:"Next.js",tone:"Professional",colorPreset:PRESETS[0],pages:"Home, About, Services, Contact",instructions:""});
+  const [globalStatus,setGlobalStatus]=useState("idle");const [log,setLog]=useState([]);const logRef=useRef(null);
+  const [previewHtml,setPreviewHtml]=useState("");const [rebuilding,setRebuilding]=useState(false);
+  const addLog=useCallback((msg,type="info")=>{setLog(p=>[...p,{msg,type,t:new Date().toLocaleTimeString()}]);setTimeout(()=>logRef.current?.scrollTo(0,99999),60)},[]);
+  const allData=[manualData,scrapedData].filter(Boolean).join("\n\n---\n\n");
+
+  useEffect(()=>{if(!apiKey&&log.length===1)addLog("enter your claude api key to enable AI features","warn")},[]);
+
+  const scrapeURL=async(item)=>{
+    if(!apiKey){addLog("need api key first","error");return}
+    setUrls(p=>p.map(u=>u.id===item.id?{...u,status:"working"}:u));addLog(`Fetching ${item.url}…`);
+    try{const result=await callClaude({system:"Extract structured business info. Return: name, description, value prop, features, design style, audience, pricing. Dense and factual.",user:`Summarize this for project data: ${item.url}`,tools:[{type:"web_search_20250305",name:"web_search"}],maxTokens:1000,apiKey});
+      setUrls(p=>p.map(u=>u.id===item.id?{...u,status:"done",data:result}:u));setScrapedData(p=>[p,`[${item.url}]\n${result}`].filter(Boolean).join("\n\n"));addLog(`✓ Scraped`,"success");
+    }catch(e){setUrls(p=>p.map(u=>u.id===item.id?{...u,status:"error"}:u));addLog(`✗ ${e.message}`,"error");}
+  };
+  const handleParse=()=>{const f=parseOperate(operateRaw);setFiles(f);setParsed(true);addLog(`Parsed ${f.length} file(s)`,"success");setTab("BUILD")};
+  const enhanceFile=useCallback(async(index)=>{
+    if(!apiKey){addLog("need api key first","error");return}
+    const file=files[index];setFiles(p=>p.map((f,i)=>i===index?{...f,status:"working"}:f));addLog(`Enhancing ${file.name}…`);
+    const others=files.filter(f=>f.name!==file.name).map(f=>`// ${f.name}\n${f.enhanced||f.original}`).join("\n\n").slice(0,2000);
+    try{const result=await callClaude({system:`Senior developer in OPERATE RAG Studio. Framework: ${config.framework} | Tone: ${config.tone} | Colors: bg=${config.colorPreset?.bg} accent=${config.colorPreset?.accent} | Pages: ${config.pages} | Extra: ${config.instructions||"none"} | Rules: Replace ALL placeholders with real values. Output ONLY file content, no fences.`,user:`FILE: ${file.name}\n\nSCAFFOLD:\n${file.original}\n\nDATA:\n${allData||"use defaults"}\n\nOTHER FILES:\n${others}\n\nProduce enhanced ${file.name}:`,maxTokens:1000,apiKey});
+      setFiles(p=>p.map((f,i)=>i===index?{...f,status:"done",enhanced:result}:f));addLog(`✓ ${file.name}`,"success");
+    }catch(e){setFiles(p=>p.map((f,i)=>i===index?{...f,status:"error"}:f));addLog(`✗ ${file.name}: ${e.message}`,"error");}
+  },[files,allData,config,apiKey]);
+  const enhanceAll=async()=>{if(!parsed){addLog("Parse first","warn");return}if(!apiKey){addLog("need api key first","error");return}setGlobalStatus("running");addLog("── Start ──","system");for(let i=0;i<files.length;i++)await enhanceFile(i);setGlobalStatus("done");addLog("── Done ──","system")};
+  const resetFile=i=>setFiles(p=>p.map((f,idx)=>idx===i?{...f,enhanced:null,status:"idle"}:f));
+  const editFile=(i,val)=>setFiles(p=>p.map((f,idx)=>idx===i?{...f,editing:val}:f));
+  const saveEdit=(i,val)=>{setFiles(p=>p.map((f,idx)=>idx===i?{...f,enhanced:val,editing:false}:f));addLog(`✎ saved`,"success")};
+  const buildApp=async()=>{
+    if(!apiKey){addLog("need api key first","error");return}
+    setRebuilding(true);addLog("Building…","system");
+    const dump=files.map(f=>`// ${f.name}\n${f.enhanced||f.original}`).join("\n\n");
+    try{const html=await callClaude({system:`Expert frontend dev. Generate complete self-contained HTML app. Tone: ${config.tone} | Colors: bg=${config.colorPreset?.bg} accent=${config.colorPreset?.accent} | Pages: ${config.pages} | Extra: ${config.instructions||"none"} | Output ONLY <!DOCTYPE html> ... </html>. No fences. No explanation. Production-ready.`,user:`DATA:\n${allData||"infer"}\n\nSCAFFOLD:\n${dump.slice(0,3000)}\n\nBuild now:`,maxTokens:1000,apiKey});
+      setPreviewHtml(html.replace(/```html|```/gi,"").trim());addLog("✓ Built","success");setTab("OUTPUT");
+    }catch(e){addLog(`✗ ${e.message}`,"error")}
+    setRebuilding(false);
+  };
+  const exportAll=()=>{const out=files.map(f=>`// ===== ${f.name} =====\n${f.enhanced||f.original}`).join("\n\n");const blob=new Blob([out],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="operate-enhanced.txt";a.click()};
+  const doneCount=files.filter(f=>f.status==="done").length;
+  const progress=files.length?(doneCount/files.length)*100:0;
+  const panelProps={operateRaw,setOperateRaw,parsed,setParsed,setFiles,handleParse,urls,setUrls,addURL:()=>setUrls(p=>[...p,{id:Date.now(),url:"",status:"idle",data:""}]),removeURL:id=>setUrls(p=>p.filter(u=>u.id!==id)),scrapeURL,scrapedData,setScrapedData,manualData,setManualData,log,logRef};
+
+  return(<div style={{width:"100%",height:"100vh",background:C.bg,color:C.text,fontFamily:MONO,display:"flex",flexDirection:"column",overflow:"hidden",maxWidth:"100%",boxSizing:"border-box",paddingBottom:32}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"10px 12px":"10px 20px",borderBottom:`1px solid ${C.border}`,background:C.surface,flexShrink:0,gap:8}}>
+      <div><span style={{fontFamily:MONO,fontSize:isMobile?15:18,color:C.accent,fontWeight:700}}>❯ operate</span>{!isMobile&&<span style={{fontSize:10,color:C.muted,marginLeft:8,letterSpacing:"0.18em"}}>rag studio</span>}<span className="cursor"></span>{!isMobile&&<span style={{fontSize:9,color:"#1a2a1a",marginLeft:8}}>· --force ./buildyou</span>}</div>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>{files.length>0&&<span style={{fontSize:10,color:C.muted}}>{doneCount}/{files.length}</span>}{doneCount>0&&<Btn sm v="ghost" onClick={exportAll}>↓</Btn>}{doneCount>0&&<Btn sm v="purple" disabled={rebuilding} onClick={buildApp}>{rebuilding?"…":"▶ Build"}</Btn>}{parsed&&<Btn sm v="accent" disabled={globalStatus==="running"} onClick={enhanceAll}>{globalStatus==="running"?"Running…":"▶ Run All"}</Btn>}</div>
+    </div>
+    <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"8px 14px",display:"flex",gap:10,alignItems:"center"}}>
+      <span style={{fontSize:10,color:C.muted,whiteSpace:"nowrap"}}>claude key:</span>
+      <input type="password" value={apiKey} onChange={e=>{setApiKey(e.target.value);localStorage.setItem('operate_key',e.target.value)}} placeholder="sk-ant-..." style={{flex:1,background:"#020402",border:`1px solid ${C.border}`,color:C.text,padding:"6px 10px",fontFamily:MONO,fontSize:11,borderRadius:4,outline:"none"}}/>
+    </div>
+    {files.length>0&&<div style={{height:2,background:C.faint,flexShrink:0}}><div style={{height:"100%",width:`${progress}%`,background:C.accent,transition:"width 0.3s",boxShadow:`0 0 6px ${C.accent}`}}/></div>}
+    <div style={{flex:1,display:"flex",overflow:"hidden",flexDirection:isMobile?"column":"row"}}>
+      {!isMobile&&<div style={{width:300,flexShrink:0,borderRight:`1px solid ${C.border}`,overflowY:"auto",display:"flex",flexDirection:"column"}}><PanelTab {...panelProps}/></div>}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,background:C.surface,flexShrink:0,overflowX:"auto"}}>
+          {(isMobile?TABS:TABS.filter(t=>t.id!=="PANEL")).map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:isMobile?"10px 4px":"8px 16px",fontSize:isMobile?10:11,fontFamily:MONO,letterSpacing:"0.08em",background:tab===t.id?C.accentDim:"transparent",color:tab===t.id?C.accent:C.muted,border:"none",borderBottom:`2px solid ${tab===t.id?C.accent:"transparent"}`,cursor:"pointer",whiteSpace:"nowrap",minWidth:isMobile?50:80}}>{isMobile?<>{t.icon}<br/><span style={{fontSize:9}}>{t.label}</span></>:t.label}</button>))}
+        </div>
+        <div style={{flex:1,overflowY:"auto",overflowX:"hidden"}}>
+          {tab==="PANEL"&&isMobile&&<PanelTab {...panelProps}/>}
+          {tab==="INPUT"&&(<div style={{padding:isMobile?14:24}}><div style={{maxWidth:600,margin:"0 auto"}}>
+            <div style={{fontFamily:MONO,fontSize:isMobile?17:22,color:C.accent,marginBottom:6,fontWeight:700}}>data production factory</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.7}}>Feed URLs and project data into the pipeline. Claude extracts, merges, and routes everything for scaffold enhancement and app generation.</div>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:10,marginBottom:20}}>{[{icon:"⚕",label:"OPERATE Scaffold",desc:"Paste OPERATE.exe™ output to parse file structure → PANEL tab"},{icon:"🌐",label:"URL Scraper",desc:"Claude fetches any URL and extracts build data automatically"},{icon:"✏️",label:"Project Data",desc:"Add brand copy, features, requirements, target audience"}].map(c=>(<div key={c.label} style={{padding:14,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8}}><div style={{fontSize:22,marginBottom:8}}>{c.icon}</div><div style={{fontSize:12,color:C.text,marginBottom:4,fontWeight:"bold"}}>{c.label}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{c.desc}</div></div>))}</div>
+            <div style={{padding:14,background:C.faint,border:`1px solid ${C.border}`,borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.7}}><div style={{color:C.text,marginBottom:6,fontSize:13}}>quick start</div><div>1. <span style={{color:C.accent}}>PANEL</span> → paste OPERATE output → Parse</div><div>2. <span style={{color:C.accent}}>PANEL</span> → add URLs or project data</div><div>3. <span style={{color:C.accent}}>STYLE</span> → pick framework, tone, colors</div><div>4. <span style={{color:C.accent}}>BUILD</span> → Run All or Enhance per file</div><div>5. <span style={{color:C.accent}}>OUTPUT</span> → preview and download your app</div></div>
+          </div></div>)}
+          {tab==="CUSTOMIZE"&&<CustomizeTab config={config} onChange={setConfig}/>}
+          {tab==="BUILD"&&<BuildTab files={files} parsed={parsed} enhanceFile={enhanceFile} editFile={editFile} saveEdit={saveEdit} resetFile={resetFile} enhanceAll={enhanceAll} globalStatus={globalStatus} buildApp={buildApp} rebuilding={rebuilding} exportAll={exportAll} doneCount={doneCount}/>}
+          {tab==="OUTPUT"&&<div style={{height:"100%",display:"flex",flexDirection:"column"}}><OutputTab html={previewHtml} buildApp={buildApp} rebuilding={rebuilding}/></div>}
+        </div>
+      </div>
+    </div>
+    <div className="footer"><span>❯ y_ · --force ./buildyou</span><span>operate rag studio · local storage only</span></div>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
